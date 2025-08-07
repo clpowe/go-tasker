@@ -1,0 +1,30 @@
+# Go build outputs
+/tasker
+/tasker.exe
+*.exe
+*.out
+
+# Go tooling
+cover.*
+profile.*
+*.test
+
+# Editors/OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# SQLite databases (local dev)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Misc
+.env
+tmp/
+dist/
+build/
