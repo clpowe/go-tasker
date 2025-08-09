@@ -3,12 +3,15 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
 )
 
@@ -199,6 +202,265 @@ func main() {
 	db, err := openDB()
 }
 
+func (s *AppState) setupUI() {
+	s.tasksList.
+		ShowSecondaryText(false).
+		SetSelectedBackgroundColor(tcell.ColorDarkCyan).
+		SetBorder(true).
+		SetTitle(" Tasks ")
+
+	s.tasksList.SetSelectedFunc(func(index int, mainText string, secondary string, shortcut rune) {
+		s.updateSelectedTaskFromIndex(index)
+	})
+
+	s.tasksList.SetChangedFunc(func(index int, mainText string, secondary string, shortcut rune) {
+		s.updateSelectedTaskFromIndex(index)
+	})
+
+	s.timerView.SetBorder(true).SetTitle(" Pomodoro ")
+
+	s.infoView.SetBorder(true).SetTitle(" Today ")
+
+	s.footer.
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignCenter).
+		SetText("[a] Add  [e] Toggle  [d] Delete  " +
+			"[p] Start/Stop  [r] Reset  [g] Goal  [q] Quit")
+
+	s.app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		switch ev.Rune() {
+		case 'q':
+			s.timer.Reset()
+			s.app.Stop()
+			return nil
+		case 'a':
+			s.promptAddTask()
+			return nil
+		case 'e':
+			s.toggleSelectedTask()
+			return nil
+		case 'd':
+			s.confirmDeleteSelectedTask()
+			return nil
+		case 'p':
+			s.toggleTimerOnSelectedTask()
+			return nil
+		case 'r':
+			s.timer.Reset()
+			s.renderTimer()
+			return nil
+		case 'g':
+			s.promptSetGoal()
+			return nil
+		}
+		return ev
+	})
+
+	s.refreshTasks()
+	s.renderTimer()
+	s.renderInfo()
+}
+
+func (s *AppState) buildLayout() tview.Primitive {
+	left := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(s.tasksList, 0, 1, true).
+		AddItem(s.footer, 1, 0, false)
+
+	right := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(s.timerView, 8, 0, false).
+		AddItem(s.infoView, 0, 1, false)
+
+	root := tview.NewFlex().
+		AddItem(left, 0, 2, true).
+		AddItem(right, 0, 3, false)
+	return root
+}
+
+func (s *AppState) refreshTasks() {
+	s.tasksList.Clear()
+	tasks, err := listTasks(s.db)
+	if err != nil {
+		s.lastTaskRefreshError = err
+		s.tasksList.AddItem("Error loading tasks", "", 0, nil)
+		return
+	}
+	s.lastTaskRefreshError = nil
+	for _, t := range tasks {
+		prefix := "[ ]"
+		if t.Done {
+			prefix = "[x]"
+		}
+		s.tasksList.AddItem(fmt.Sprintf("%s %s", prefix, t.Title), "", 0, nil)
+	}
+	// keep selection valid
+	if s.tasksList.GetItemCount() > 0 {
+		s.tasksList.SetCurrentItem(0)
+		s.updateSelectedTaskFromIndex(0)
+	} else {
+		s.selectedTaskID = nil
+		s.selectedTaskTitle = ""
+	}
+}
+
+func (s *AppState) updateSelectedTaskFromIndex(index int) {
+	tasks, err := listTasks(s.db)
+	if err != nil || index < 0 || index >= len(tasks) {
+		s.selectedTaskID = nil
+		s.selectedTaskTitle = ""
+		return
+	}
+	t := tasks[index]
+	s.selectedTaskID = &t.ID
+	s.selectedTaskTitle = t.Title
+}
+
+func (s *AppState) promptAddTask() {
+	input := tview.NewInputField().SetLabel("Title: ")
+	form := tview.NewForm().
+		AddFormItem(input).
+		AddButton("Add", func() {
+			title := strings.TrimSpace(input.GetText())
+			if title != "" {
+				_ = addTask(s.db, title)
+				s.refreshTasks()
+			}
+			s.app.SetRoot(s.buildLayout(), true)
+		}).
+		AddButton("Cancel", func() {
+			s.app.SetRoot(s.buildLayout(), true)
+		})
+	form.SetBorder(true).SetTitle(" New Task ").SetTitleAlign(tview.AlignLeft)
+	s.app.SetRoot(centered(60, 7, form), true).SetFocus(form)
+}
+
+func (s *AppState) toggleSelectedTask() {
+	idx := s.tasksList.GetCurrentItem()
+	tasks, err := listTasks(s.db)
+	if err != nil || idx < 0 || idx >= len(tasks) {
+		return
+	}
+	t := tasks[idx]
+	_ = toggleTaskDone(s.db, t.ID, !t.Done)
+	s.refreshTasks()
+}
+
+func (s *AppState) confirmDeleteSelectedTask() {
+	idx := s.tasksList.GetCurrentItem()
+	tasks, err := listTasks(s.db)
+	if err != nil || idx < 0 || idx >= len(tasks) {
+		return
+	}
+	t := tasks[idx]
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Delete \"%s\"?", t.Title)).
+		AddButtons([]string{"Delete", "Cancel"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			if buttonLabel == "Delete" {
+				_ = deleteTask(s.db, t.ID)
+				s.refreshTasks()
+			}
+			s.app.SetRoot(s.buildLayout(), true)
+		})
+	s.app.SetRoot(modal, true).SetFocus(modal)
+}
+
+func (s *AppState) toggleTimerOnSelectedTask() {
+	if s.timer == nil {
+		return
+	}
+	if s.timer.running {
+		s.timer.PauseOrStop()
+		return
+	}
+	// start work on selected task (can be nil if none selected)
+	s.timer.StartWork(s.selectedTaskID)
+	s.renderTimer()
+}
+
+func (s *AppState) promptSetGoal() {
+	input := tview.NewInputField().
+		SetLabel("Daily goal (minutes): ").
+		SetText(fmt.Sprintf("%d", s.goalMinutes))
+	form := tview.NewForm().
+		AddFormItem(input).
+		AddButton("Save", func() {
+			txt := strings.TrimSpace(input.GetText())
+			m, err := strconv.Atoi(txt)
+			if err == nil && m > 0 {
+				s.goalMinutes = m
+				_ = setDailyGoal(s.db, m)
+				s.renderTimer()
+				s.renderInfo()
+			}
+			s.app.SetRoot(s.buildLayout(), true)
+		}).
+		AddButton("Cancel", func() {
+			s.app.SetRoot(s.buildLayout(), true)
+		})
+	form.SetBorder(true).SetTitle(" Daily Focus Goal ").SetTitleAlign(tview.AlignLeft)
+	s.app.SetRoot(centered(60, 7, form), true).SetFocus(form)
+}
+
+func (s *AppState) renderTimer() {
+	s.timerView.Clear()
+	modeStr := "Work"
+	if s.timer.mode == ModeBreak {
+		modeStr = "Break"
+	}
+	runningStr := "paused"
+	if s.timer.running {
+		runningStr = "running"
+	}
+	var remaining time.Duration
+	s.timer.mu.Lock()
+	remaining = s.timer.remaining
+	s.timer.mu.Unlock()
+
+	mm := int(remaining.Minutes())
+	ss := int(remaining.Seconds()) % 60
+
+	var taskLine string
+	if s.selectedTaskID != nil && s.selectedTaskTitle != "" &&
+		s.timer.mode == ModeWork {
+		taskLine = fmt.Sprintf("Task: %s (id %d)",
+			s.selectedTaskTitle, *s.selectedTaskID)
+	} else {
+		taskLine = "Task: (none)"
+	}
+
+	today := s.todayFocusMinutes
+	goal := s.goalMinutes
+	pct := 0.0
+	if goal > 0 {
+		pct = float64(today) / float64(goal)
+		if pct > 1.0 {
+			pct = 1.0
+		}
+	}
+	bar := progressBar(20, pct)
+
+	fmt.Fprintf(s.timerView, "Mode: %s (%s)\n", modeStr, runningStr)
+	fmt.Fprintf(s.timerView, "Remaining: %02d:%02d\n", mm, ss)
+	fmt.Fprintf(s.timerView, "%s\n", taskLine)
+	fmt.Fprintf(
+		s.timerView,
+		"Today: %d/%d min %s\n",
+		today,
+		goal,
+		bar,
+	)
+}
+
+func (s *AppState) renderInfo() {
+	s.infoView.Clear()
+	// Simple stats for today
+	sessions, _ := countTodaySessions(s.db)
+	fmt.Fprintf(s.infoView, "Work sessions today: %d\n", sessions)
+	if s.lastTasksRefreshError != nil {
+		fmt.Fprintf(s.infoView, "Last error: %v\n", s.lastTasksRefreshError)
+	}
+}
+
 /***** DB layer *****/
 
 func openDB() (*sql.DB, error) {
@@ -272,7 +534,7 @@ func addTask(db *sql.DB, title string) error {
 	return err
 }
 
-func listTask(db *sql.DB) ([]Task, error) {
+func listTasks(db *sql.DB) ([]Task, error) {
 	rows, err := db.Query(
 		"SELECT id, title, done , created_at, completed_at" +
 			"FROM tasks ORDER BY done ASC, created_at DESC",
@@ -409,4 +671,17 @@ func todayBounds() (time.Time, time.Time) {
 	start := time.Date(y, m, d, 0, 0, 0, 0, loc)
 	end := time.Date(y, m, d, 23, 59, 59, 0, loc)
 	return start, end
+}
+
+func centered(width, height int, p tview.Primitive) tview.Primitive {
+	return tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(
+			tview.NewFlex().SetDirection(tview.FlexRow).
+				AddItem(nil, 0, 1, false).
+				AddItem(p, height, 1, true).
+				AddItem(nil, 0, 1, false),
+			width, 1, true,
+		).
+		AddItem(nil, 0, 1, false)
 }
