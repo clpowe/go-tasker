@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -23,7 +25,9 @@ func main() {
 	list.SetBorder(true)
 	list.SetTitle(" Tasks ")
 
-	timerView := tview.NewTextView().SetBorder(true).SetTitle(" Pomodoro ")
+	timerView := tview.NewTextView()
+	timerView.SetBorder(true)
+	timerView.SetTitle(" Pomodoro ")
 	infoView := tview.NewTextView().SetBorder(true).SetTitle(" Today ")
 	footer := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).
 		SetText("[a] Add  [e] Toggle  [d] Delete  [p] Start/Stop  [r] Reset  [g] Goal  [q] Quit")
@@ -51,8 +55,43 @@ func main() {
 
 	refresh()
 
+	workDur, breakDur := 25*time.Minute, 5*time.Minute
+	timer := &PomodoroTimer{
+		workDuration:  workDur,
+		breakDuration: breakDur,
+		remaining:     workDur,
+	}
+	renderTimer := func() {
+		timerView.Clear()
+		timer.mu.Lock()
+		rem := timer.remaining
+		mode := timer.mode
+		running := timer.running
+		timer.mu.Unlock()
+		mm, ss := int(rem.Minutes()), int(rem.Seconds())%60
+		modeS := map[PomodoroMode]string{ModeWork: "Work", ModeBreak: "Break"}[mode]
+		state := "paused"
+		if running {
+			state = "running"
+		}
+		fmt.Fprintf(timerView, "Mode: %s (%s)\nRemaining: %02d:%02d\n", modeS, state, mm, ss)
+	}
+
+	// Use draw-queuing updates (safe from background goroutines)
+	timer.onTick = func() { app.QueueUpdateDraw(renderTimer) }
+	timer.onStateChanged = func() { app.QueueUpdateDraw(renderTimer) }
+
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch ev.Rune() {
+		case 'p':
+			if timer.running {
+				timer.PauseOrStop()
+			} else {
+				timer.StartWork(nil)
+			}
+			// Immediately reflect state change without queuing (we're already in UI loop)
+			renderTimer()
+			return nil
 		case 'e':
 			i := list.GetCurrentItem()
 			if i >= 0 && i < len(data) {
@@ -83,6 +122,8 @@ func main() {
 		}
 		return ev
 	})
+
+	renderTimer()
 
 	if err := app.SetRoot(root, true).Run(); err != nil {
 		log.Fatal(err)
