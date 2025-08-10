@@ -21,6 +21,17 @@ func promptAddTask(app *tview.Application, db *sql.DB, rebuild func()) {
 	app.SetRoot(centered(60, 7, form), true).SetFocus(form)
 }
 
+func confirmDelete(app *tview.Application, title string, onOK func()) {
+	m := tview.NewModal().SetText(`DELETE "` + title + `"?`).
+		AddButtons([]string{"Delete", "Cancel"}).
+		SetDoneFunc(func(i int, l string) {
+			if l == "Delete" {
+				onOK()
+			}
+		})
+	app.SetRoot(m, true).SetFocus(m)
+}
+
 func centered(w, h int, p tview.Primitive) tview.Primitive {
 	return tview.NewFlex().AddItem(nil, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
