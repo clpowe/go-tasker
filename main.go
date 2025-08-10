@@ -7,6 +7,15 @@ import (
 )
 
 func main() {
+	db, err := openDB()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	if err := migrate(db); err != nil {
+		log.Fatal(err)
+	}
+
 	app := tview.NewApplication()
 	root := tview.NewTextView().
 		SetBorder(true).
