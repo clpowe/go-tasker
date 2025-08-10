@@ -68,6 +68,9 @@ func main() {
 					_ = deleteTask(db, t.ID)
 					refresh()
 					app.SetRoot(root, true)
+				}, func() {
+					// Cancel: just return to the main layout
+					app.SetRoot(root, true)
 				})
 			}
 			return nil
