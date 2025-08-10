@@ -26,3 +26,8 @@ func listTasks(db *sql.DB) ([]Task, error) {
 	}
 	return out, rows.Err()
 }
+
+func addTask(db *sql.DB, title string) error {
+	_, err := db.Exec(`INSERT INTO tasks(title, done) VALUES(?,0)`, title)
+	return err
+}

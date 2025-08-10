@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
@@ -31,6 +32,14 @@ func main() {
 		}
 		list.AddItem(p+" "+t.Title, "", 0, nil)
 	}
+
+	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		if ev.Rune() == 'a' {
+			promptAddTask(app, db, func() { app.SetRoot(root, true) })
+			return nil
+		}
+		return ev
+	})
 
 	if err := app.SetRoot(root, true).Run(); err != nil {
 		log.Fatal(err)
