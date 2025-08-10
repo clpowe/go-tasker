@@ -22,7 +22,15 @@ func main() {
 	list := tview.NewList()
 	list.SetBorder(true)
 	list.SetTitle(" Tasks ")
-	root := tview.NewFlex().AddItem(list, 0, 1, true)
+
+	timerView := tview.NewTextView().SetBorder(true).SetTitle(" Pomodoro ")
+	infoView := tview.NewTextView().SetBorder(true).SetTitle(" Today ")
+	footer := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).
+		SetText("[a] Add  [e] Toggle  [d] Delete  [p] Start/Stop  [r] Reset  [g] Goal  [q] Quit")
+
+	left := tview.NewFlex().SetDirection(tview.FlexRow).AddItem(list, 0, 1, true).AddItem(footer, 1, 0, false)
+	right := tview.NewFlex().SetDirection(tview.FlexRow).AddItem(timerView, 8, 0, false).AddItem(infoView, 0, 1, false)
+	root := tview.NewFlex().AddItem(left, 0, 2, true).AddItem(right, 0, 3, false)
 
 	var data []Task
 
