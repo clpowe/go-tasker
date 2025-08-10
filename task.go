@@ -31,3 +31,12 @@ func addTask(db *sql.DB, title string) error {
 	_, err := db.Exec(`INSERT INTO tasks(title, done) VALUES(?,0)`, title)
 	return err
 }
+
+func toggleTaskDone(db *sql.DB, id int64, done bool) error {
+	if done {
+		_, err := db.Exec(`UPDATE tasks SET done=1,completed_at=datetime('now') WHERE id=?`, id)
+		return err
+	}
+	_, err := db.Exec(`UPDATE tasks SET done=0,completed_at=NULL WHERE id=?`, id)
+	return err
+}

@@ -24,18 +24,39 @@ func main() {
 	list.SetTitle(" Tasks ")
 	root := tview.NewFlex().AddItem(list, 0, 1, true)
 
-	tasks, _ := listTasks(db)
-	for _, t := range tasks {
-		p := "[ ]"
-		if t.Done {
-			p = "[x]"
+	var data []Task
+
+	unchecked := "☐"
+	checked := "☑︎"
+
+	refresh := func() {
+		list.Clear()
+		data, _ = listTasks(db)
+		for _, t := range data {
+			mark := unchecked
+			if t.Done {
+				mark = checked
+			}
+			list.AddItem(mark+" "+t.Title, "", 0, nil)
 		}
-		list.AddItem(p+" "+t.Title, "", 0, nil)
 	}
 
+	refresh()
+
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
-		if ev.Rune() == 'a' {
-			promptAddTask(app, db, func() { app.SetRoot(root, true) })
+		switch ev.Rune() {
+		case 'e':
+			i := list.GetCurrentItem()
+			if i >= 0 && i < len(data) {
+				_ = toggleTaskDone(db, data[i].ID, !data[i].Done)
+				refresh()
+			}
+			return nil
+		case 'a':
+			promptAddTask(app, db, func() {
+				refresh()
+				app.SetRoot(root, true)
+			})
 			return nil
 		}
 		return ev
