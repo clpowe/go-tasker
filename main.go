@@ -52,6 +52,17 @@ func main() {
 				refresh()
 			}
 			return nil
+		case 'd':
+			i := list.GetCurrentItem()
+			if i >= 0 && i < len(data) {
+				t := data[i]
+				confirmDelete(app, t.Title, func() {
+					_ = deleteTask(db, t.ID)
+					refresh()
+					app.SetRoot(root, true)
+				})
+			}
+			return nil
 		case 'a':
 			promptAddTask(app, db, func() {
 				refresh()
