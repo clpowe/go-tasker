@@ -40,3 +40,8 @@ func toggleTaskDone(db *sql.DB, id int64, done bool) error {
 	_, err := db.Exec(`UPDATE tasks SET done=0,completed_at=NULL WHERE id=?`, id)
 	return err
 }
+
+func deleteTask(db *sql.DB, id int64) error {
+	_, err := db.Exec(`DELETE FROM tasks WHERE id=?`, id)
+	return err
+}
