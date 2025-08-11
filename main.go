@@ -61,6 +61,11 @@ func main() {
 		breakDuration: breakDur,
 		remaining:     workDur,
 	}
+
+	timer.onWorkCompleted = func(taskID *int64, start, end time.Time, dur time.Duration) {
+		_ = insertSession(db, taskID, start, end, dur)
+	}
+
 	renderTimer := func() {
 		timerView.Clear()
 		timer.mu.Lock()
