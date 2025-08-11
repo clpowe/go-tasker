@@ -14,6 +14,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	defer db.Close()
 	if err := migrate(db); err != nil {
 		log.Fatal(err)
@@ -28,7 +29,11 @@ func main() {
 	timerView := tview.NewTextView()
 	timerView.SetBorder(true)
 	timerView.SetTitle(" Pomodoro ")
-	infoView := tview.NewTextView().SetBorder(true).SetTitle(" Today ")
+
+	infoView := tview.NewTextView()
+	infoView.SetBorder(true)
+	infoView.SetTitle(" Today ")
+
 	footer := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).
 		SetText("[a] Add  [e] Toggle  [d] Delete  [p] Start/Stop  [r] Reset  [g] Goal  [q] Quit")
 
@@ -66,6 +71,14 @@ func main() {
 		_ = insertSession(db, taskID, start, end, dur)
 	}
 
+	goal, _ := getDailyGoal(db)
+	today, _ := getTodayFocusMinutes(db)
+
+	renderInfo := func() {
+		infoView.Clear()
+		fmt.Fprintf(infoView, "Work sessions today: (see sessions)\n")
+	}
+
 	renderTimer := func() {
 		timerView.Clear()
 		timer.mu.Lock()
@@ -79,15 +92,31 @@ func main() {
 		if running {
 			state = "running"
 		}
-		fmt.Fprintf(timerView, "Mode: %s (%s)\nRemaining: %02d:%02d\n", modeS, state, mm, ss)
+		pct := 0.0
+		if goal > 0 {
+			pct = float64(today) / float64(goal)
+			if pct > 1 {
+				pct = 1
+			}
+		}
+		fmt.Fprintf(timerView, "Mode: %s (%s)\nRemaining: %02d:%02d\nToday: %d/%d min %s\n",
+			modeS, state, mm, ss, today, goal, progressBar(20, pct))
 	}
 
+	timer.onWorkCompleted = func(taskID *int64, start, end time.Time, dur time.Duration) {
+		_ = insertSession(db, taskID, start, end, dur)
+		today, _ = getTodayFocusMinutes(db)
+		app.QueueUpdateDraw(func() { renderTimer(); renderInfo() })
+	}
 	// Use draw-queuing updates (safe from background goroutines)
 	timer.onTick = func() { app.QueueUpdateDraw(renderTimer) }
 	timer.onStateChanged = func() { app.QueueUpdateDraw(renderTimer) }
 
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch ev.Rune() {
+		case 'g':
+			promptSetGoal(app, db, goal, func() { goal, _ = getDailyGoal(db); app.SetRoot(root, true); renderTimer() })
+			return nil
 		case 'p':
 			if timer.running {
 				timer.PauseOrStop()
